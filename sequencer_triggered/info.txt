@@ -1,0 +1,6 @@
+vhdl files for programming second digital board
+takes trigger from first digital board
+
+to change/compile, go to
+~/kyle/fpga/Sequencer_Triggered_Test
+which is a Xilinx ISE project
