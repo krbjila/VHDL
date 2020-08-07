@@ -142,9 +142,9 @@ ram_clk <= clk;
         if falling_edge(clk) then
             led(7 downto 0) <= not sequence_logic(63 downto 56);
             case(state) is
-                when idle => -- get ready to run
+                when idle => -- get ready to run, output defaults
                     ticks_til_update <= 100; 
---                    sequence_logic <= conv_std_logic_vector(0, 64);
+                    sequence_logic <= conv_std_logic_vector(0, 64);
                     sequence_count <= 0;
                 when run => 
                     if ticks_til_update < 0 then -- something changes, we are adding 10 ns at each switch

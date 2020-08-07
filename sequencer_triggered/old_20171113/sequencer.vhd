@@ -13,11 +13,13 @@ entity sequencer is
 		hi_inout  : inout std_logic_vector(15 downto 0);
 		hi_muxsel : out   std_logic;
 		-- ok peripherals --
-        led    : out   std_logic_vector(7 downto 0);
+      --- led    : out   std_logic_vector(7 downto 0);
 		-- 100 MHz from PLL --
 		clk_100 : in std_logic;	
         -- sequence out --
-        logic_out : inout std_logic_vector(63 downto 0) := (others => '0')
+        logic_out : inout std_logic_vector(62 downto 0) := (others => '0');
+		  --- trigger ---
+		  trigger	: in	std_logic
 	);
 end sequencer;
 
@@ -41,12 +43,12 @@ architecture arch of sequencer is
     signal ep80pipe  : std_logic_vector(15 downto 0); 
     signal ep80write : std_logic; -- hi during communication
    
-    type state_type is (idle, load, run); --global state types
+    type state_type is (idle, load, run, ready); --global state types
     signal state : state_type := idle; --global state
-    
+	     
     signal ticks_til_update : integer := 10;
     signal sequence_count   : integer range 0 to 1000 := 0;
-    signal sequence_logic   : std_logic_vector(63 downto 0) := (others => '0') ;
+    signal sequence_logic   : std_logic_vector(62 downto 0) := (others => '0') ;
 
     signal clk     : std_logic;
     signal slo_clk : std_logic;
@@ -79,7 +81,13 @@ hi_muxsel <= '0'; -- ok says so...
 clk <= ti_clk when (state = load) else
        clk_50; -- 100MHz clock causes channels 56-63 to be glitchy
 ram_clk <= clk;
+
 --led(7) <= slo_clk;
+
+state <= idle when ep00wire(1 downto 0) = "00" else
+         load when ep00wire(1 downto 0) = "01" else
+         run when ep00wire(1 downto 0) = "10" and trigger = '1' else
+         ready;
 
     --slo_clk
     process (clk_100) is --it blinks twice a second. 
@@ -103,20 +111,22 @@ ram_clk <= clk;
             clk_50 <= not clk_50;
         end if;
     end process;
-        
-    --control state with ep00wrire
-    process (ep00wire, clk_100) is
-    begin
-        if rising_edge(clk_100) then --trigger state change on clk
-            if ep00wire(1 downto 0) = "00" then
-                state <= idle;
-            elsif ep00wire(1 downto 0) = "01" then
-                state <= load;
-            elsif ep00wire(1 downto 0) = "10" then
-                state <= run;
-            end if;
-        end if;
-    end process;
+    	
+--		--- control state with ep00wrire
+--    process (ep00wire, clk_100, trigger) is
+--    begin
+--        if rising_edge(clk_100) then --trigger state change on clk
+--            if ep00wire(1 downto 0) = "00" then
+--                state <= idle;
+--            elsif ep00wire(1 downto 0) = "01" then
+--                state <= load;
+--            elsif ep00wire(1 downto 0) = "10" and trigger = '1' then
+--                state <= run;
+--				else
+--					state <= ready;
+--            end if;
+--        end if;
+--    end process;
 
     --control ram_data_i, ram_we
     process (clk, state, ep80write, ep80pipe) is
@@ -135,35 +145,36 @@ ram_clk <= clk;
         end if;
     end process;
 
-    -- control sequence_logic, 
-    process(clk, state, ram_data_o) is
+    -- control sequence_logic,
+    -- Having trigger in process is causing it to trigger on the falling edge, which is unstable (and offset) from the rising edge. Can we put a "if trigger = '0' then break" command? ldm
+    process(clk, state, ram_data_o, trigger) is
         variable read_logic : std_logic_vector(95 downto 0) := conv_std_logic_vector(0, 96); -- holds data read from ram.
-    begin
-        if falling_edge(clk) then
-            led(7 downto 0) <= not sequence_logic(63 downto 56);
+	 begin
+		if falling_edge(clk) then
+				--- following line not necessary...
+				--- led(7 downto 0) <= not sequence_logic(62 downto 56);
             case(state) is
-                when idle => -- get ready to run
-                    ticks_til_update <= 100; 
---                    sequence_logic <= conv_std_logic_vector(0, 64);
+                when (idle) => -- get ready to run, output defaults
+                    ticks_til_update <= 10; 
+                    sequence_logic <= conv_std_logic_vector(0, 63);
                     sequence_count <= 0;
-                when run => 
-                    if ticks_til_update < 0 then -- something changes, we are adding 10 ns at each switch
-                        sequence_logic <= read_logic(63 downto 0);
-                        if conv_integer(read_logic(95 downto 64)) = 0 then -- the sequence is done. start over
-                            sequence_count <= 0;
-                            ticks_til_update <= 10;
-                        else -- update outputs and ticks til next update
-                            ticks_til_update <= conv_integer(read_logic(95 downto 64)-2);
-                            sequence_count <= sequence_count+1;
-                        end if;
-                    else  -- tick
-                        ticks_til_update <= ticks_til_update - 1;
-                        if ticks_til_update < 6 then -- need to read from ram
-                            read_logic((ticks_til_update+1)*16-1 downto (ticks_til_update)*16) := ram_data_o;
-                        end if;
-                        sequence_logic <= sequence_logic;
-                        sequence_count <= sequence_count;
-                    end if;
+					when (run) =>
+						sequence_logic <= read_logic(62 downto 0);
+						  if ticks_til_update < 0 then -- something changes, we are adding 10 ns at each switch
+								if conv_integer(read_logic(95 downto 64)) = 0 then -- the sequence is done. start over
+									null;
+								else -- update outputs and ticks til next update
+									 ticks_til_update <= conv_integer(read_logic(95 downto 64)-2);
+									 sequence_count <= sequence_count+1;
+								end if;
+						  else  -- tick
+								ticks_til_update <= ticks_til_update - 1;
+								if ticks_til_update < 6 then -- need to read from ram
+									 read_logic((ticks_til_update+1)*16-1 downto (ticks_til_update)*16) := ram_data_o;
+								end if;
+								sequence_logic <= sequence_logic;
+								sequence_count <= sequence_count;
+						  end if;
                 when others => null;
             end case;
         end if;
@@ -381,9 +392,6 @@ ram_clk <= clk;
     logic_out(62) <= sequence_logic(62) when (ep07wire(14)='0' and ep08wire(14)='0') else
                     not sequence_logic(62) when (ep07wire(14)='0' and ep08wire(14)='1') else
                     ep08wire(14);
-    logic_out(63) <= sequence_logic(63) when (ep07wire(15)='0' and ep08wire(15)='0') else
-                    not sequence_logic(63) when (ep07wire(15)='0' and ep08wire(15)='1') else
-                    ep08wire(15);
 
 ram_block : ram
 generic map(

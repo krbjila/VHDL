@@ -156,7 +156,7 @@ state <= idle when ep00wire(1 downto 0) = "00" else
             case(state) is
                 when (idle) => -- get ready to run, output defaults
                     ticks_til_update <= 10; 
-                    sequence_logic <= conv_std_logic_vector(0, 63);
+--                    sequence_logic <= conv_std_logic_vector(0, 63);
                     sequence_count <= 0;
 					when (run) =>
 						sequence_logic <= read_logic(62 downto 0);
